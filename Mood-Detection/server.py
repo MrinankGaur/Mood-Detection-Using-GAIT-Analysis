@@ -188,6 +188,7 @@ async def async_stream_readings(esp32_ip="192.168.4.1", port=3333):
         logger.info("Connected to ESP32!")
     except Exception as e:
         logger.error(f"Failed to connect to ESP32: {e}")
+        yield {"error": f"Hardware connection failed: {e}. Please ensure ESP32 is powered on and reachable."}
         return
 
     sample = 0
@@ -229,55 +230,68 @@ async def async_stream_readings(esp32_ip="192.168.4.1", port=3333):
 
 async def sensor_stream_worker():
     """Async task that fakes or reads sensor data and sends over WS at ~60fps."""
-    global prediction_buffer, BACKGROUND_TASK_RUNNING
+    global prediction_buffer, BACKGROUND_TASK_RUNNING, IS_COLLECTING
     logger.info("Sensor streaming loop started.")
 
     frame_count = 0
     fps_start = time.time()
 
-    async for row in async_stream_readings():
-        if not BACKGROUND_TASK_RUNNING:
-            break
+    while BACKGROUND_TASK_RUNNING:
+        if not IS_COLLECTING:
+            await asyncio.sleep(0.5)
+            continue
 
-        prediction_buffer.append(row)
+        async for row in async_stream_readings():
+            if not BACKGROUND_TASK_RUNNING or not IS_COLLECTING:
+                break
+                
+            if isinstance(row, dict) and "error" in row:
+                await manager.broadcast_stream({"type": "error", "message": row["error"]})
+                IS_COLLECTING = False
+                break
 
-        try:     
-            # Row shape: timestamp, 16xpressure, 3xRightAcc, 3xRightGyro, 3xLeftAcc, 3xLeftGyro, mood
-            values = np.array([float(x) for x in row[1:29]])  # excluding timestamp and mood
-            pressure_vals = values[0:16]
+            prediction_buffer.append(row)
 
-            # 1. Heatmap Data (Fast! CPU)
-            z_flat = RBF_MATRIX @ pressure_vals
-            # We round to reduce JSON size over WS
-            z_rounded = np.round(z_flat).astype(int).tolist()
+            try:     
+                # Row shape: timestamp, 16xpressure, 3xRightAcc, 3xRightGyro, 3xLeftAcc, 3xLeftGyro, mood
+                values = np.array([float(x) for x in row[1:29]])  # excluding timestamp and mood
+                pressure_vals = values[0:16]
 
-            # 2. Orientation Data
-            dxr, dyr, tr = update_orientation_data(values[16:19], BASELINE_R)
-            dxl, dyl, tl = update_orientation_data(values[22:25], BASELINE_L, invert=True)
+                # 1. Heatmap Data (Fast! CPU)
+                z_flat = RBF_MATRIX @ pressure_vals
+                # We round to reduce JSON size over WS
+                z_rounded = np.round(z_flat).astype(int).tolist()
 
-            payload = {
-                "type": "sensor_frame",
-                "heatmap": z_rounded, # 2500 int values
-                "grid_size": GRID_SIZE,
-                "right": {"dx": float(dxr), "dy": float(dyr), "tilt": float(tr)},
-                "left": {"dx": float(dxl), "dy": float(dyl), "tilt": float(tl)},
-                "buffer_count": len(prediction_buffer)
-            }
+                # 2. Orientation Data
+                dxr, dyr, tr = update_orientation_data(values[16:19], BASELINE_R)
+                dxl, dyl, tl = update_orientation_data(values[22:25], BASELINE_L, invert=True)
 
-            # Broadcast to all connected clients
-            await manager.broadcast_stream(payload)
-            frame_count += 1
+                payload = {
+                    "type": "sensor_frame",
+                    "heatmap": z_rounded, # 2500 int values
+                    "grid_size": GRID_SIZE,
+                    "right": {"dx": float(dxr), "dy": float(dyr), "tilt": float(tr)},
+                    "left": {"dx": float(dxl), "dy": float(dyl), "tilt": float(tl)},
+                    "buffer_count": len(prediction_buffer)
+                }
 
-            if frame_count % 300 == 0:
-                elapsed = time.time() - fps_start
-                logger.info(f"Streaming at {300/elapsed:.1f} FPS")
-                fps_start = time.time()
+                # Broadcast to all connected clients
+                await manager.broadcast_stream(payload)
+                frame_count += 1
 
-        except Exception as e:
-            logger.error("Error formatting frame data: %s", e)
+                if frame_count % 300 == 0:
+                    elapsed = time.time() - fps_start
+                    logger.info(f"Streaming at {300/elapsed:.1f} FPS")
+                    fps_start = time.time()
 
-        # Yield to event loop, rate is now driven naturally by ESP32 rather than artificial sleep
-        await asyncio.sleep(0)
+            except Exception as e:
+                logger.error("Error formatting frame data: %s", e)
+
+            # Yield to event loop, rate is now driven naturally by ESP32 rather than artificial sleep
+            await asyncio.sleep(0)
+            
+        # Give a small delay before attempting to reconnect if IS_COLLECTING is somehow still true
+        await asyncio.sleep(0.5)
 
 
 # ==========================================

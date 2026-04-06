@@ -72,7 +72,7 @@ if __name__ == '__main__':
     # keep previous interactive behavior when run directly
     mood = input("Enter mood label (sad/happy/angry): ")
     iteration = input("Enter iteration number (1/2/3): ")
-    filename = "sujal_" + mood + iteration + ".csv"
+    filename = "mrinank_" + mood + iteration + ".csv"
 
     print("Connecting to ESP32...")
     print("Connected!")

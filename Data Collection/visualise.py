@@ -69,7 +69,7 @@ def setup_ori_axis(ax, title):
 setup_ori_axis(ax_ori_l, "Left Foot")
 setup_ori_axis(ax_ori_r, "Right Foot")
 
-quiver_r = ax_ori_r.quiver(0, 0, 0, 0, color='#00e5ff', scale=1, scale_units='xy', angles='xy', animated=True)
+quiver_r = ax_ori_r.quiver(0, 0, 0, 0, color="#00fff2", scale=1, scale_units='xy', angles='xy', animated=True)
 quiver_l = ax_ori_l.quiver(0, 0, 0, 0, color='#00e5ff', scale=1, scale_units='xy', angles='xy', animated=True)
 tilt_text_r = ax_ori_r.text(0, -1.25, "", color='#ccccff', ha='center', animated=True)
 tilt_text_l = ax_ori_l.text(0, -1.25, "", color='#ccccff', ha='center', animated=True)

@@ -79,6 +79,9 @@ export const MoodProvider = ({ children }: { children: React.ReactNode }) => {
         const data = JSON.parse(event.data);
         if (data.type === 'sensor_frame') {
           setSensorData(data);
+        } else if (data.type === 'error') {
+          alert(data.message);
+          setIsCollecting(false);
         }
       } catch (err) {
         console.error('Error parsing stream data', err);
